@@ -4,9 +4,11 @@ import numpy as np
 import pandas as pd
 
 
-# Nota: En el notebook hay dos versiones de _normalize_key definidas en momentos distintos.
-# Para preservar ese comportamiento, exponemos ambas y dejamos _normalize_key apuntando a la versión "estricta" por defecto.
-def _normalize_key_strict(x: str) -> str:
+# ==========================
+# Normalización de texto
+# ==========================
+
+def normalize_key_strict(x: str) -> str:
     """
     a) strip espacios (extremos)
     b) elimina acentos
@@ -17,7 +19,7 @@ def _normalize_key_strict(x: str) -> str:
         x (str): La cadena a normalizar
 
     Returns:
-        str: La cadena normalizada (estricta)
+        str: La cadena normalizada
     """
     x = str(x).strip()
     x = unicodedata.normalize("NFKD", x).encode("ascii", "ignore").decode("ascii")
@@ -26,11 +28,11 @@ def _normalize_key_strict(x: str) -> str:
     return x
 
 
-def _normalize_key_soft(x: str) -> str:
+def normalize_key_soft(x: str) -> str:
     """
     Versión más suave usada en celdas posteriores del notebook:
-    - Normaliza acentos y espacios
-    - Mantiene números y signos (solo colapsa espacios)
+    - Normaliza acentos
+    - Solo colapsa espacios y lowercase (mantiene números y signos)
     """
     x = str(x)
     x = unicodedata.normalize("NFKD", x).encode("ascii", "ignore").decode("ascii")
@@ -38,12 +40,11 @@ def _normalize_key_soft(x: str) -> str:
     return x
 
 
-# Alias por compatibilidad con el notebook (inicia en modo "estricto")
-_normalize_key = _normalize_key_strict
+# ==========================
+# Países
+# ==========================
 
-
-MAP = {
-    # Muy casero pero es lo que tenemos y lo que funciona
+MAP_PAISES = {
     "mexico": "México",
     "mexco": "México",
     "mexuco": "México",
@@ -70,34 +71,23 @@ MAP = {
 
 def homogeneizar_pais(x: str) -> str:
     """
-    Normaliza el nombre de un país para que sea consistente con el diccionario MAP.
-
-    Args:
-        x (str): El nombre del país a normalizar
-
-    Returns:
-        str: El nombre del país normalizado
+    Normaliza el nombre de un país para que sea consistente con el diccionario MAP_PAISES.
     """
     if pd.isna(x):
         return x
-    key = _normalize_key(x)
-    return MAP.get(key, str(x).strip())
+    key = normalize_key_strict(x)
+    return MAP_PAISES.get(key, str(x).strip())
 
+
+# ==========================
+# Edad y género
+# ==========================
 
 def transforma_edad(df: pd.DataFrame, age_col: str) -> pd.DataFrame:
     """
     Transforma la columna de edad en una columna ordinal y una columna de punto medio.
-
-    Args:
-        df (pd.DataFrame): El DataFrame con la columna de edad
-        age_col (str): El nombre de la columna de edad
-
-    Returns:
-        pd.DataFrame: El DataFrame con las columnas de edad ordinal y punto medio
     """
     out = df.copy()
-    # Orden lógico para análisis/visualización y uso en modelado
-    age_order = ["Menor de 18", "18-24", "25-34", "35-44", "45-54", "55+"]
     age_label_to_ordinal = {
         "Menor de 18": 0,
         "18-24": 1,
@@ -106,8 +96,6 @@ def transforma_edad(df: pd.DataFrame, age_col: str) -> pd.DataFrame:
         "45-54": 4,
         "55+": 5,
     }
-    # Punto medio para analísis demográfico
-    # En 18 pongo 16.0 porque es el punto medio entre 15 y 18 y está a 5 años de distancia de los otros grupos
     age_label_to_midpoint = {
         "Menor de 18": 16.5,
         "18-24": 21.0,
@@ -123,56 +111,38 @@ def transforma_edad(df: pd.DataFrame, age_col: str) -> pd.DataFrame:
 
 def transforma_genero(df: pd.DataFrame, gender_col: str) -> pd.DataFrame:
     """
-    Transforma la columna de género en dummies.
-
-    Args:
-        df (pd.DataFrame): El DataFrame con la columna de género
-        gender_col (str): El nombre de la columna de género
-
-    Returns:
-        pd.DataFrame: El DataFrame con las columnas de género dummies
+    Transforma la columna de género en dummies `genero_*`.
     """
     out = df.copy()
-    out["genero_categoria"] = pd.Categorical(gender_col, ordered=False)
-    # Transformación en dummies del estilo genero_{genero}
-    # OJO: se quedan las 3 categorías, hombre, mujer y otro.
+    out["genero_categoria"] = pd.Categorical(df[gender_col], ordered=False)
     dummies_genero = pd.get_dummies(out["genero_categoria"], prefix="genero", dtype="uint8")
     out = pd.concat([out, dummies_genero], axis=1)
     return out
 
 
-def _slug(x: str) -> str:
-    """
-    Normaliza el nombre de una columna para que sea consistente con el diccionario MAP.
-
-    Args:
-        x (str): El nombre de la columna a normalizar
-
-    Returns:
-        str: El nombre de la columna normalizado
-    """
+def slug(x: str) -> str:
+    """Normaliza nombres a snake simple (ascii)."""
     x = unicodedata.normalize("NFKD", str(x)).encode("ascii", "ignore").decode("ascii")
     x = re.sub(r"[^a-zA-Z0-9]+", "_", x)
     return x.strip("_").lower()
 
 
-rel_cols = ["fanatico", "atleta_amateur", "atleta_profesional", "trabajo_industria", "no_activo"]
+# ==========================
+# Relación con el deporte
+# ==========================
+
+REL_COLS = ["fanatico", "atleta_amateur", "atleta_profesional", "trabajo_industria", "no_activo"]
 
 
-def _ohe_relacion(txt: str) -> pd.Series:
+def ohe_relacion(txt: str) -> pd.Series:
     """
-    Transforma la columna de relación con el deporte en dummies.
-
-    Args:
-        txt (str): El texto de la columna de relación con el deporte
-
-    Returns:
-        pd.Series: Las columnas de relación con el deporte dummies
+    Transforma la columna de relación con el deporte en dummies `rel_*`.
+    Usa normalización estricta.
     """
-    out = {k: 0 for k in rel_cols}
+    out = {k: 0 for k in REL_COLS}
     if pd.isna(txt):
         return pd.Series(out)
-    t = _normalize_key(txt)
+    t = normalize_key_strict(txt)
     if "fanatic" in t:
         out["fanatico"] = 1
     if "amateur" in t:
@@ -194,7 +164,6 @@ FREQ_ORDER = [
     "Veo cada partido que puedo",
 ]
 
-
 FREQ_TO_ORD = {
     "Nunca": 0,
     "Menos de una vez al mes": 1,
@@ -203,6 +172,10 @@ FREQ_TO_ORD = {
     "Veo cada partido que puedo": 4,
 }
 
+
+# ==========================
+# Canales en vivo
+# ==========================
 
 CANALES = [
     "tv_abierta",
@@ -215,7 +188,6 @@ CANALES = [
     "youtube",
 ]
 
-
 ALIAS2CANAL = {
     # TV abierta / cable
     "tv abierta": "tv_abierta",
@@ -227,7 +199,7 @@ ALIAS2CANAL = {
     "streaming": "streaming",
     "youtube": "youtube",
     "dazn": "streaming",
-    "danz": "streaming",  # aparece como danz jaja
+    "danz": "streaming",
     # Redes / radio / estadio / app
     "redes sociales": "redes_sociales",
     "radio": "radio",
@@ -238,30 +210,21 @@ ALIAS2CANAL = {
     "samsung tv": "tv_cable",
 }
 
-
-NEGACIONES = ["no sigo los juegos en vivo", "no aplica"]
-INDETERMINADO = ["donde lo pasen"]
+NEGACIONES_CANAL = ["no sigo los juegos en vivo", "no aplica"]
+INDETERMINADO_CANAL = ["donde lo pasen"]
 
 
 def featurize_canales(txt: str) -> pd.Series:
-    """
-    Featuriza las respuestas de la columna de canales en una serie de dummies.
-
-    Args:
-        txt (str): La respuesta de la columna de canales
-
-    Returns:
-        pd.Series: La serie de dummies
-    """
+    """Dummies `canal__*` usando normalización suave."""
     out = {f"canal__{c}": 0 for c in CANALES}
     flags = {"canal__no_en_vivo": 0, "canal__indiferente": 0}
     if pd.isna(txt):
         return pd.Series({**out, **flags})
-    t = _normalize_key(txt)
-    if any(neg in t for neg in NEGACIONES):
+    t = normalize_key_soft(txt)
+    if any(neg in t for neg in NEGACIONES_CANAL):
         flags["canal__no_en_vivo"] = 1
         return pd.Series({**out, **flags})
-    if any(ind in t for ind in INDETERMINADO):
+    if any(ind in t for ind in INDETERMINADO_CANAL):
         flags["canal__indiferente"] = 1
     for alias, canal in ALIAS2CANAL.items():
         if alias in t:
@@ -269,8 +232,11 @@ def featurize_canales(txt: str) -> pd.Series:
     return pd.Series({**out, **flags})
 
 
-REDES = ["instagram", "twitter_x", "facebook", "tiktok", "youtube"]
+# ==========================
+# Redes sociales
+# ==========================
 
+REDES = ["instagram", "twitter_x", "facebook", "tiktok", "youtube"]
 
 ALIAS2RED = {
     "instagram": "instagram",
@@ -282,24 +248,16 @@ ALIAS2RED = {
     "you tube": "youtube",
 }
 
-
 NEGACIONES_RED = ["no lo sigo en redes sociales", "no aplica"]
 
 
 def featurize_redes(txt: str) -> pd.Series:
-    """
-    Featuriza las respuestas de la columna de redes en una serie de dummies.
-
-    Args:
-        txt (str): La respuesta de la columna de redes
-
-    out = {f"rs__{r}": 0 for r in REDES}
-    """
+    """Dummies `rs__*` usando normalización suave."""
     out = {f"rs__{r}": 0 for r in REDES}
     flags = {"rs__no_redes": 0, "rs__no_aplica": 0}
     if pd.isna(txt):
         return pd.Series({**out, **flags})
-    t = _normalize_key(txt)
+    t = normalize_key_soft(txt)
     if "no aplica" in t:
         flags["rs__no_aplica"] = 1
         return pd.Series({**out, **flags})
@@ -311,6 +269,10 @@ def featurize_redes(txt: str) -> pd.Series:
             out[f"rs__{red}"] = 1
     return pd.Series({**out, **flags})
 
+
+# ==========================
+# Tipos de contenido
+# ==========================
 
 TIPOS = [
     "resumenes_highlights",
@@ -324,7 +286,6 @@ TIPOS = [
     "contenido_club",
     "creadoras_contenido",
 ]
-
 
 ALIAS2TIPO = {
     # Resúmenes
@@ -354,47 +315,38 @@ ALIAS2TIPO = {
     "contenido del club": "contenido_club",
 }
 
-
 NEGACIONES_TIPO = ["no aplica"]
 
 
 def featurize_tipos(txt: str) -> pd.Series:
-    """
-    Featuriza las respuestas de la columna de tipos en una serie de dummies.
-
-    Args:
-        txt (str): La respuesta de la columna de tipos
-
-    Returns:
-        pd.Series: La serie de dummies
-    """
+    """Dummies `cont__*` usando normalización suave."""
     out = {f"cont__{t}": 0 for t in TIPOS}
     flags = {"cont__no_aplica": 0}
     if pd.isna(txt):
         return pd.Series({**out, **flags})
-    t = _normalize_key(txt)
+    t = normalize_key_soft(txt)
     if any(neg in t for neg in NEGACIONES_TIPO):
         flags["cont__no_aplica"] = 1
         return pd.Series({**out, **flags})
     for alias, tipo in ALIAS2TIPO.items():
         if alias in t:
-            out[f"cont__{tipo}"] = 1
+            # Nota: el notebook mapea estas dos alias a "contenido_creado_por_usuarios",
+            # que no está en TIPOS. Respetamos esa lógica (no se creará columna si no existe en TIPOS).
+            key = f"cont__{tipo}"
+            if key in out:
+                out[key] = 1
     return pd.Series({**out, **flags})
 
 
+# ==========================
+# Sigue equipos / jugadoras
+# ==========================
+
 def featurize_sigue(txt: str) -> pd.Series:
-    """
-    Featuriza las respuestas de la columna de sigue en una serie de dummies.
-
-    Args:
-        txt (str): La respuesta de la columna de sigue
-
-    Returns:
-        pd.Series: La serie de dummies
-    """
+    """Devuelve `sigue_equipos` y `sigue_jugadoras` (usa normalización suave)."""
     if pd.isna(txt):
         return pd.Series({"sigue_equipos": np.nan, "sigue_jugadoras": np.nan})
-    t = _normalize_key(txt)
+    t = normalize_key_soft(txt)
     if "ambos" in t:
         return pd.Series({"sigue_equipos": 1, "sigue_jugadoras": 1})
     if "equipos" in t:
@@ -406,32 +358,32 @@ def featurize_sigue(txt: str) -> pd.Series:
     return pd.Series({"sigue_equipos": np.nan, "sigue_jugadoras": np.nan})
 
 
+# ==========================
+# Asistencia a partidos
+# ==========================
+
 def featurize_asistencia(txt: str) -> pd.Series:
-    """
-    Featuriza las respuestas de la columna de asistencia en una serie de dummies.
-
-    Args:
-        txt (str): La respuesta de la columna de asistencia
-
-    Returns:
-        pd.Series: La serie con `asist_ord` y `ha_asistido`
-    """
+    """Devuelve `asist_ord` y `ha_asistido` (usa normalización suave)."""
     if pd.isna(txt):
         return pd.Series({"asist_ord": np.nan, "ha_asistido": np.nan})
-    t = _normalize_key(txt)
+    t = normalize_key_soft(txt)
     if "con frecuencia" in t:
         k = 2
     elif "una o dos" in t or "una o dos veces" in t:
         k = 1
     elif "no aplica" in t:
         return pd.Series({"asist_ord": np.nan, "ha_asistido": 0})
-    elif "no" in t:  # cubre "no, pero me gustaria" y "no, y no me interesa"
+    elif "no" in t:
         k = 0
     else:
         k = np.nan
     ha = (k in (1, 2)) * 1 if not pd.isna(k) else np.nan
     return pd.Series({"asist_ord": k, "ha_asistido": ha})
 
+
+# ==========================
+# Percepción patrocinio
+# ==========================
 
 PERCEP_MAP_NORM = {
     "Mucho menos favorable": -2,
@@ -443,19 +395,14 @@ PERCEP_MAP_NORM = {
 
 
 def map_percepcion(x: str) -> int:
-    """
-    Mapea la percepción de una marca al verla patrocinando fútbol femenino a un valor ordinal.
-
-    Args:
-        x (str): La respuesta de la columna de percepción
-
-    Returns:
-        int: El valor ordinal de la percepción
-    """
     if pd.isna(x):
         return np.nan
     return PERCEP_MAP_NORM.get(x, np.nan)
 
+
+# ==========================
+# Compra por patrocinio
+# ==========================
 
 COMPRA_MAP_NORM = {
     "Sí": 1,
@@ -466,33 +413,19 @@ COMPRA_MAP_NORM = {
 
 
 def map_compra(x: str) -> int:
-    """
-    Mapea la respuesta de la columna de compra a un valor ordinal.
-
-    Args:
-        x (str): La respuesta de la columna de compra
-
-    Returns:
-        int: El valor ordinal de la compra
-    """
     if pd.isna(x):
         return np.nan
     return COMPRA_MAP_NORM.get(x, np.nan)
 
 
+# ==========================
+# Inversión igual que masculino
+# ==========================
+
 def map_inversion(x: str) -> pd.Series:
-    """
-    Mapea la respuesta de la columna de inversión a un valor ordinal y categoría.
-
-    Args:
-        x (str): La respuesta de la columna de inversión
-
-    Returns:
-        pd.Series: La serie de dummies
-    """
     if pd.isna(x):
         return pd.Series({"inversion_igual_ord": np.nan, "inversion_igual_cat": np.nan})
-    t = _normalize_key(x)
+    t = normalize_key_soft(x)
     if t.startswith("si"):
         return pd.Series({"inversion_igual_ord": 1, "inversion_igual_cat": "si"})
     if t == "no":
@@ -502,13 +435,14 @@ def map_inversion(x: str) -> pd.Series:
     return pd.Series({"inversion_igual_ord": np.nan, "inversion_igual_cat": np.nan})
 
 
-def map_actitud(x):
-    """
-    Mapea actitud hacia marcas a ordinal y categoría.
-    """
+# ==========================
+# Actitud hacia marcas (apoyo/boicot)
+# ==========================
+
+def map_actitud(x: str) -> pd.Series:
     if pd.isna(x):
         return pd.Series({"actitud_marca_ff_ord": np.nan, "actitud_marca_ff_cat": np.nan})
-    t = _normalize_key(x)
+    t = normalize_key_soft(x)
     if "boicot" in t:
         return pd.Series({"actitud_marca_ff_ord": -1, "actitud_marca_ff_cat": "boicot"})
     if "no cambiaria" in t or "no cambia" in t:
@@ -518,13 +452,14 @@ def map_actitud(x):
     return pd.Series({"actitud_marca_ff_ord": np.nan, "actitud_marca_ff_cat": np.nan})
 
 
-def map_sentimiento(x):
-    """
-    Mapea sentimiento respecto a campañas con deportistas a escala ordinal.
-    """
+# ==========================
+# Sentimiento campañas con deportistas
+# ==========================
+
+def map_sentimiento(x: str):
     if pd.isna(x):
         return np.nan
-    t = _normalize_key(x)
+    t = normalize_key_soft(x)
     if "forzado" in t or "superficial" in t:
         return -1
     if "no lo noto" in t:
@@ -533,5 +468,191 @@ def map_sentimiento(x):
         return 2
     if "me gusta" in t or "confianza" in t:
         return 1
+    return np.nan
+
+
+# ==========================
+# Crecimiento a 5 años
+# ==========================
+
+def map_crecimiento(x: str) -> pd.Series:
+    if pd.isna(x):
+        return pd.Series({"crecimiento_5y_ord": np.nan, "crecimiento_5y_no_seguro": 0})
+    t = normalize_key_soft(x)
+    if "se mantendra igual" in t:
+        return pd.Series({"crecimiento_5y_ord": 0, "crecimiento_5y_no_seguro": 0})
+    if "crecera lentamente" in t:
+        return pd.Series({"crecimiento_5y_ord": 1, "crecimiento_5y_no_seguro": 0})
+    if "crecera significativamente" in t:
+        return pd.Series({"crecimiento_5y_ord": 2, "crecimiento_5y_no_seguro": 0})
+    if "no estoy seguro" in t:
+        return pd.Series({"crecimiento_5y_ord": np.nan, "crecimiento_5y_no_seguro": 1})
+    return pd.Series({"crecimiento_5y_ord": np.nan, "crecimiento_5y_no_seguro": 0})
+
+
+# ==========================
+# Desafíos (multi)
+# ==========================
+
+DESAFIOS_MAP = {
+    "desafio_estereotipos_genero": ["Estereotipos de género"],
+    "desafio_falta_cobertura_mediatica": ["Falta de cobertura mediática"],
+    "desafio_poca_independencia": [
+        "Poca independencia de las liga/clubes masculinos",
+        "En Argentina a nivel selección e interclubes se mueven e intercambian siempre las mismas jugadoras. Es decir",
+    ],
+    "desafio_pocas_oportunidades_jovenes": [
+        "Falta de talleres que impulsen a las niñas a entrenar desde chicas",
+        "Pocas oportunidades para niñas y adolescentes",
+    ],
+    "desafio_estigma_social": ["Estigma social"],
+    "desafio_falta_espacios": [
+        "Falta de espacios públicos para el deporte",
+        "Experiencia del aficionado (Localidad de estadios y experiencia dentro)",
+    ],
+    "desafio_promocion_debil": ["Promoción débil"],
+    "desafio_baja_calidad_juego": ["Baja calidad de juego"],
+    "desafio_poca_inversion": ["Poca inversión", "Poco interés de los directivos de fútbol"],
+    "desafio_bajos_salarios": [
+        "Bajos salarios de jugadoras",
+        "Falta de reglas claras para mantener un balance competitivo en la cancha",
+    ],
+    "desafio_aficion_no_crece": ["La afición no está creciendo"],
+}
+
+
+def _split_multi(s: str) -> set:
+    return {p.strip() for p in s.split(",")} if isinstance(s, str) else set()
+
+
+def featurize_desafios(s: str) -> pd.Series:
+    opts = _split_multi(s)
+    out = {}
+    for col_name, frases in DESAFIOS_MAP.items():
+        out[col_name] = 1 if any(frase in opts for frase in frases) else 0
+    return pd.Series(out)
+
+
+# ==========================
+# Valores (multi)
+# ==========================
+
+VAL_TOKENS = {
+    "pasion": "Pasión",
+    "liderazgo": ["Liderazgo", "Lealtad"],
+    "profesionalismo": [
+        "Profesionalismo",
+        "En proceso de profesionalismo",
+        "Perseverancia y honestidad",
+    ],
+    "esfuerzo": ["Esfuerzo", "Perseverancia y honestidad"],
+    "resiliencia": [
+        "Resiliencia",
+        "Todo les cuesta el doble con tal de alcanzar lo mismo que el fútbol masculino obtiene por el hecho de existir.",
+    ],
+    "empoderamiento": "Empoderamiento",
+    "igualdad": ["Igualdad", "Inclusión"],
+    "superacion": "Superación",
+    "trabajo_equipo": "Trabajo en equipo",
+}
+
+
+def featurize_valores(s: str) -> pd.Series:
+    opts = _split_multi(s)
+    out = {}
+    for k, etiquetas in VAL_TOKENS.items():
+        if isinstance(etiquetas, str):
+            out[f"valor__{k}"] = 1 if etiquetas in opts else 0
+        else:
+            out[f"valor__{k}"] = 1 if any(e in opts for e in etiquetas) else 0
+    return pd.Series(out)
+
+
+# ==========================
+# ¿Por qué no ves? (multi)
+# ==========================
+
+NO_VES_TOKENS = {
+    "prefiere_masculino": [
+        "Prefiero ver fútbol masculino",
+        "Prefiero ver fútbol masculino, prefiero ver nauru vs vanuatu sub-15",
+    ],
+    "no_se_donde_ver": ["No sé dónde verlo / no está disponible"],
+    "nivel_competitivo": ["Siento que no tiene suficiente nivel competitivo"],
+    "no_identificacion": ["No me identifico con los equipos o jugadoras"],
+    "no_interesa_en_general": ["No me interesa el fútbol en general"],
+    "no_tiempo": ["No tengo tiempo"],
+    "nunca_lo_plantee": ["Nunca me lo he planteado"],
+    "otro": ["No veo la tele"],
+}
+
+
+def featurize_no_ves(s: str) -> pd.Series:
+    opts = _split_multi(s)
+    out = {}
+    for k, frases in NO_VES_TOKENS.items():
+        out[f"no_ves__{k}"] = int(any(frase in opts for frase in frases))
+    return pd.Series(out)
+
+
+# ==========================
+# Necesidades (multi)
+# ==========================
+
+NEED_TOKENS = {
+    "mas_difusion": ["Más difusión en TV o redes"],
+    "jugadoras_conocidas_historias": ["Jugadoras más conocidas o con historias personales"],
+    "mejor_nivel": ["Mejor nivel competitivo"],
+    "clubes_profesionales": ["Clubes o ligas más profesionales"],
+    "mayor_separacion_masculino": ["Mayor separación del fútbol masculino"],
+    "mas_contenido_atractivo": ["Más contenido atractivo"],
+    "mayor_asociacion_con_marcas": ["Asociación con marcas que me atraen"],
+    "recomendacion_influencer": ["Que lo recomiende alguien que sigo"],
+    "nada": ["Nada me haría verlo"],
+}
+
+
+def featurize_need(s: str) -> pd.Series:
+    opts = _split_multi(s)
+    out = {}
+    for k, frases in NEED_TOKENS.items():
+        out[f"need__{k}"] = int(any(frase in opts for frase in frases))
+    return pd.Series(out)
+
+
+# ==========================
+# Mapas simples (ligas, contenido, percepción general, sabía liga)
+# ==========================
+
+LIGAS_MAP = {
+    "No, ninguna": 0,
+    "Me suenan, pero no conozco una en concreto": 1,
+    "Sí, una o dos": 2,
+    "Sí, varias": 3,
+}
+
+CONTENIDO_MAP = {
+    "No": -1,
+    "Sí, alguna vez": 1,
+    "Sí, muchas veces": 2,
+    "No lo recuerdo bien": 0,
+}
+
+PERC_MAP = {
+    "Amateur": -1,
+    "Aún en crecimiento": 1,
+    "Profesional, pero poco difundido": 2,
+    "Igual de valioso que el masculino, pero subestimado": 3,
+    "No tengo una opinión formada": 0,
+}
+
+
+def flag_conoce_liga(v: str) -> float:
+    if v == "Sí":
+        return 1
+    if v == "No":
+        return -1
+    if v == "Tal vez":
+        return 0
     return np.nan
 
