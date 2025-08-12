@@ -284,7 +284,7 @@ TIPOS = [
     "noticieros_profesionales",
     "noticieros_independientes",
     "contenido_club",
-    "creadoras_contenido",
+    'contenido_creado_por_usuarios'
 ]
 
 ALIAS2TIPO = {
